@@ -73,7 +73,7 @@ pub struct HighwayHashState {
 }
 
 impl HighwayHashState {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let state: HighwayHashState = HighwayHashState {
             v0: [0; 4],
             v1: [0; 4],
@@ -230,16 +230,15 @@ impl HighwayHashState {
     fn process_all(&mut self, data: &Vec<u8>, key: [u64; 4]) {
         self.reset(key);
 
-        let mut i: usize = 0;
         let data_size = data.len();
-
-        while (i + 32) <= data_size {
-            i = i + 32;
-            self.update_packet(&data[i..]);
+        let mut offset: usize = 0;
+        while (offset + 32) <= data_size {
+            self.update_packet(&data[offset..]);
+            offset += 32;
         }
 
         if (data_size & 31) != 0 {
-            self.update_remainder(&data[i..], data_size & 31);
+            self.update_remainder(&data[offset..], data_size & 31);
         }
     }
 }
@@ -260,4 +259,90 @@ pub fn highway_hash256(data: &Vec<u8>, key: [u64; 4]) -> [u64; 4] {
     let mut state = HighwayHashState::new();
     state.process_all(data, key);
     state.finalize256()
+}
+
+#[derive(Copy, Clone)]
+pub struct HighwayHashCat {
+    state: HighwayHashState,
+    packet: [u8; 32],
+    num: usize,
+}
+
+impl HighwayHashCat {
+    pub fn new(key: [u64; 4]) -> Self {
+        let mut hash_cat = HighwayHashCat {
+            state: HighwayHashState::new(),
+            packet: [0; 32],
+            num: 0,
+        };
+
+        hash_cat.state.reset(key);
+        hash_cat
+    }
+
+    pub fn append(&mut self, data: &[u8]) {
+        let mut data_size: usize = data.len();
+        let mut offset: usize = 0;
+
+        if self.num != 0 {
+            let num_add: usize = if data_size > (32 as usize).wrapping_sub(self.num) {
+                (32 as usize).wrapping_sub(self.num)
+            } else {
+                data_size
+            };
+
+            let mut i: usize = 0;
+            while i < num_add {
+                self.packet[self.num.wrapping_add(i)] = data[i];
+                i = i.wrapping_add(1)
+            }
+            self.num = self.num.wrapping_add(num_add);
+
+            data_size = (data_size).wrapping_sub(num_add);
+            offset = num_add;
+
+            if self.num == 32 {
+                self.state.update_packet(&self.packet[..]);
+                self.num = 0
+            }
+        }
+
+        while data_size >= 32 {
+            self.state.update_packet(&data[offset..]);
+
+            data_size = (data_size).wrapping_sub(32);
+            offset = 32;
+        }
+
+        let mut i: usize = 0;
+        while i < data_size {
+            self.packet[self.num] = data[offset.wrapping_add(i)];
+            self.num += 1;
+            i = i.wrapping_add(1)
+        }
+    }
+
+    pub fn finish64(&self) -> u64 {
+        let mut copy: HighwayHashState = self.state;
+        if self.num != 0 {
+            copy.update_remainder(&self.packet[..], self.num);
+        }
+        copy.finalize64()
+    }
+
+    pub fn finish128(&self) -> [u64; 2] {
+        let mut copy: HighwayHashState = self.state;
+        if self.num != 0 {
+            copy.update_remainder(&self.packet[..], self.num);
+        }
+        copy.finalize128()
+    }
+
+    pub fn finalize256(&self) -> [u64; 4] {
+        let mut copy: HighwayHashState = self.state;
+        if self.num != 0 {
+            copy.update_remainder(&self.packet[..], self.num);
+        }
+        copy.finalize256()
+    }
 }
