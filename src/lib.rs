@@ -117,12 +117,15 @@ mod tests {
             data[i] = i as u8;
             let v: Vec<u8> = data[0..i].to_vec();
             let mut cat = HighwayHashCat::new(TEST_KEY1);
-            cat.append(&v);
+
+            if i > 32 {
+                cat.append(&v[..16]);
+                cat.append(&v[16..]);
+            } else {
+                cat.append(&v);
+            }
+
             let hash = cat.finish64();
-            println!(
-                "num: {}, hash require: {}, value : {}",
-                i, EXPECTED64[i], hash
-            );
             assert_eq!(EXPECTED64[i], hash);
         }
     }
